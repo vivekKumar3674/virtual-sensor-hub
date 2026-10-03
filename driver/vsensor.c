@@ -293,6 +293,6 @@ module_init(vsensor_init);
 module_exit(vsensor_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Your Name");
+MODULE_AUTHOR("Vivek Kumar");
 MODULE_DESCRIPTION("Virtual temperature/humidity sensor character driver");
 MODULE_VERSION("1.0");
