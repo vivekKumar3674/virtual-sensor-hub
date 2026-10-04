@@ -219,7 +219,6 @@ static const struct file_operations vsensor_fops = {
 	.release        = vsensor_release,
 	.read           = vsensor_read,
 	.unlocked_ioctl = vsensor_ioctl,
-	.llseek         = no_llseek,
 };
 
 /* ---- Module init / exit --------------------------------------------------- */
