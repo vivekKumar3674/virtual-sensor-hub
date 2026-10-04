@@ -1,6 +1,7 @@
+AUTHOR- VIVEK KUMAR
 # Virtual Sensor Hub
 
-A practice project where I tried to connect the pieces of a small Linux monitoring setup: a kernel driver that pretends to be a temperature/humidity sensor, a C++ background program that reads it, and a small client to talk to that program over the network.
+A project where I tried to connect the pieces of a small Linux monitoring setup: a kernel driver that pretends to be a temperature/humidity sensor, a C++ background program that reads it, and a small client to talk to that program over the network.
 
 I wanted to see how data actually travels from the kernel up to a normal program, so everything here is deliberately small.
 
@@ -14,9 +15,13 @@ I wanted to see how data actually travels from the kernel up to a normal program
 ## What each part does
 
 - **driver/** - a character device driver. A kernel timer makes a new fake reading every second (it wanders between 15-45 C and 20-90 % humidity). A program that reads `/dev/vsensor` gets one reading and waits if there is nothing new yet. The sampling interval can be changed with an `ioctl` or through `/sys/module/vsensor/parameters/interval_ms`.
+ 
 - **daemon/** - the C++ program. One thread reads the device, one writes every reading to a CSV file, one watches for a too-high temperature, and one serves TCP clients. Ctrl+C shuts it all down cleanly.
+  
 - **client/** - a tiny command-line tool: you type `GET` or `STATUS` and it prints the daemon's answer.
+  
 - **tests/** - a fake sensor (feeds the daemon through a named pipe) and a shell script that tests the daemon without needing the kernel module.
+  
 - **docs/DESIGN.md** - my design notes and diagrams.
 
 ## Setup
@@ -48,7 +53,7 @@ sudo ./build/sensor_daemon --threshold 26
 ./build/monitor_client WATCH      # live view, Ctrl+C to stop
 ```
 
-Logs end up in `logs/`. When you are done, press Ctrl+C in terminal 1, then:
+Logs end up in `logs/`. When it's done, press Ctrl+C in terminal 1, then:
 
 ```bash
 sudo rmmod vsensor
@@ -92,4 +97,6 @@ The alert switches to ALERT when the temperature goes above the threshold and ba
 
 ## Credits
 
-Practice project. I built and tested it myself on a real kernel, initial code and design.
+This is a practice project that I designed, implemented and tested myself on a real Linux kernel.
+The project idea, architecture, technical decisions, and implementation are my own.
+I used AI to help draft and organize the docs/DESIGN.md and readme documentation.
