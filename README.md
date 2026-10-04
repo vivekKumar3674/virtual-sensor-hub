@@ -1,113 +1,95 @@
 # Virtual Sensor Hub
 
-A small embedded-style monitoring system for Linux:
+A practice project where I tried to connect the pieces of a small Linux monitoring setup: a kernel driver that pretends to be a temperature/humidity sensor, a C++ background program that reads it, and a small client to talk to that program over the network.
 
-* a **kernel character-device driver** that simulates a temperature/humidity sensor,
-* a **multithreaded C++ daemon** that reads it, logs data, raises alerts and serves remote clients,
-* a **TCP command-line client**.
+I wanted to see how data actually travels from the kernel up to a normal program, so everything here is deliberately small.
 
 ```
- timer ──► /dev/vsensor ──read()──► sensor_daemon ──TCP──► monitor_client
- (kernel)   char driver              (C++ threads)          (user)
-                                      ├─ readings.csv
-                                      └─ alerts.log
+ kernel timer -> /dev/vsensor -> sensor_daemon -> TCP -> monitor_client
+ (driver, C)                     (C++ threads)           (C++)
+                                  |- logs/readings.csv
+                                  '- logs/alerts.log
 ```
 
-Languages: C (kernel module), C++17 (user space). Platform: Linux only.
+## What each part does
 
-## Repository layout
+- **driver/** - a character device driver. A kernel timer makes a new fake reading every second (it wanders between 15-45 C and 20-90 % humidity). A program that reads `/dev/vsensor` gets one reading and waits if there is nothing new yet. The sampling interval can be changed with an `ioctl` or through `/sys/module/vsensor/parameters/interval_ms`.
+- **daemon/** - the C++ program. One thread reads the device, one writes every reading to a CSV file, one watches for a too-high temperature, and one serves TCP clients. Ctrl+C shuts it all down cleanly.
+- **client/** - a tiny command-line tool: you type `GET` or `STATUS` and it prints the daemon's answer.
+- **tests/** - a fake sensor (feeds the daemon through a named pipe) and a shell script that tests the daemon without needing the kernel module.
+- **docs/DESIGN.md** - my design notes and diagrams.
 
-| Path | Contents |
-|---|---|
-| `driver/` | `vsensor.c` kernel module, `vsensor_ioctl.h` (shared with user space), `Makefile` |
-| `daemon/` | `main.cpp` + header-only classes: `Sensor`/`DeviceSensor`, `ThreadSafeQueue<T>`, `Logger`, `Server`, `SharedState` |
-| `client/` | `client.cpp` - `monitor_client` |
-| `tests/` | `fake_sensor.cpp` (stand-in for the driver) and `run_tests.sh` (integration test) |
-| `docs/` | `DESIGN.md` - architecture and UML diagrams |
+## Setup
 
-## Requirements
+You need a Linux machine. For the driver, use a virtual machine, because a mistake in a kernel module can crash the whole system. I used Ubuntu in VirtualBox.
 
 ```bash
-sudo apt install build-essential linux-headers-$(uname -r)
-```
-
-> **Load the kernel module in a VM (or QEMU), not on your main machine.** A bug in any
-> kernel module can crash the whole system.
-
-## Build
-
-```bash
-make            # daemon, client, fake sensor  -> ./build/
+sudo apt install build-essential linux-headers-$(uname -r) git
+git clone https://github.com/vivekKumar3674/virtual-sensor-hub.git
+cd virtual-sensor-hub
+make            # daemon, client, fake sensor  -> build/
 make driver     # kernel module                -> driver/vsensor.ko
 ```
 
-## Run with the real driver
+## Running it with the real driver
 
 ```bash
-sudo insmod driver/vsensor.ko              # optional: interval_ms=500
-dmesg | tail -3                            # "vsensor: loaded: /dev/vsensor ..."
-ls -l /dev/vsensor
-sudo cat /sys/module/vsensor/parameters/interval_ms
+sudo insmod driver/vsensor.ko
+sudo dmesg | tail -3          # should say "vsensor: loaded: /dev/vsensor ..."
 
-sudo ./build/sensor_daemon                 # Ctrl-C to stop (needs access to /dev/vsensor)
-# in a second terminal:
+# terminal 1 - leave this one running
+sudo ./build/sensor_daemon --threshold 26
+
+# terminal 2
 ./build/monitor_client GET
 ./build/monitor_client STATUS
 ./build/monitor_client SET_THRESHOLD 30
-./build/monitor_client SET_INTERVAL 200    # goes through ioctl() into the driver
-./build/monitor_client WATCH               # live view, Ctrl-C to stop
+./build/monitor_client SET_INTERVAL 200
+./build/monitor_client WATCH      # live view, Ctrl+C to stop
+```
 
-tail -f logs/readings.csv logs/alerts.log
+Logs end up in `logs/`. When you are done, press Ctrl+C in terminal 1, then:
+
+```bash
 sudo rmmod vsensor
 ```
 
-Run in the background with `sudo ./build/sensor_daemon --daemon` and stop it with `sudo pkill sensor_daemon`.
-`./build/sensor_daemon --help` lists all options.
+## Trying it without the kernel module
 
-## Run without the kernel module (testing)
+If you only want to check the C++ side (this also works in WSL):
 
 ```bash
 make test
 ```
 
-`tests/fake_sensor` writes the same binary records the driver would into a named pipe, so the
-whole user-space stack (threads, alert state machine, logging, TCP protocol, clean shutdown) is
-tested with no kernel module. `SET_INTERVAL` is *expected* to fail there (a pipe has no ioctl).
+It starts the fake sensor and the daemon, sends some commands and checks the answers and log files. `SET_INTERVAL` is *supposed* to fail there, since a pipe has no `ioctl`.
 
-## Network protocol
+## Commands the daemon understands
 
-One text command per line, one reply line per command.
-
-| Command | Reply |
+| Command | Example reply |
 |---|---|
-| `GET` | `OK seq=12 temp=25.40 hum=51.20 ts=2026-10-04T10:15:02` |
-| `STATUS` | `OK state=NORMAL readings=120 alerts=1 threshold=35.00 uptime=120s` |
-| `SET_THRESHOLD <degC>` | `OK threshold=30.00` |
-| `SET_INTERVAL <ms>` | `OK interval=200` (valid 10..60000) |
+| `GET` | `OK seq=475 temp=20.03 hum=32.04 ts=2026-10-04T07:14:58` |
+| `STATUS` | `OK state=NORMAL readings=27 alerts=0 threshold=22.00 uptime=26s` |
+| `SET_THRESHOLD <C>` | `OK threshold=30.00` |
+| `SET_INTERVAL <ms>` | `OK interval=200` (10 to 60000) |
 | `QUIT` | `OK bye` |
 
-The server listens on `127.0.0.1` only by default (there is no authentication). Use `--any`
-to listen on all interfaces.
+The alert switches to ALERT when the temperature goes above the threshold and back to NORMAL only once it drops 1 C below it, so it doesn't flip back and forth around the limit. The server only listens on localhost unless you pass `--any`. There is no login, so don't expose it.
 
-## Concepts demonstrated
+## Things that went wrong along the way
 
-| Area | Where |
-|---|---|
-| Char device driver, `file_operations`, `cdev`, device class | `driver/vsensor.c` |
-| Kernel timer, softirq context rules, spinlock, wait queue | `driver/vsensor.c` |
-| `copy_to_user` / `copy_from_user`, `ioctl`, module parameter (sysfs) | `driver/vsensor.c` |
-| OOP: abstract class, polymorphism, RAII, deleted copy | `daemon/sensor.hpp` |
-| Templates, mutex + condition variable | `daemon/thread_safe_queue.hpp` |
-| `std::thread`, atomics, producer/consumer | `daemon/main.cpp`, `state.hpp` |
-| Sockets, `poll()`, thread per client | `daemon/server.hpp`, `client/client.cpp` |
-| Signals (`sigwait`, signal masks), daemonization (double fork), file descriptors | `daemon/main.cpp` |
-| Makefile, bash testing, Git | `Makefile`, `tests/run_tests.sh` |
-| Requirements, UML, state machine | `docs/DESIGN.md` |
+- On Ubuntu with Linux 7.0 headers the driver didn't compile at first: `no_llseek` no longer exists there. The device already refuses seeking via `nonseekable_open()`, so I just removed that line.
+- `dmesg` said "Operation not permitted" until I used `sudo`.
+- The client said "cannot connect" because I had stopped the daemon with Ctrl+C. It has to stay running in its own terminal.
+- WSL can't load kernel modules, so I tested the C++ part there and the driver in the VM.
 
-## Limitations / future work
+## Limits
 
-* The sensor is simulated. A real one would use GPIO / I2C through a platform driver.
-* No authentication or encryption on the TCP port (TLS would be the next step).
-* One thread per client with no limit; a thread pool would be better.
-* Single device instance; multiple sensors would need minor numbers per device.
-* Driver built and run on Linux 7.0 (Ubuntu in VirtualBox); also compiles against 6.8 headers.
+- The sensor is fake. A real one would need a platform driver and GPIO or I2C.
+- No encryption or authentication on the TCP port.
+- One thread per client, with no limit.
+- I've only run it on one machine (Ubuntu with Linux 7.0 in VirtualBox). The driver also compiled against 6.8 headers.
+
+## Credits
+
+Practice project. I built and tested it myself on a real kernel, with an AI assistant helping with the initial code and design.
