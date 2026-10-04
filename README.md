@@ -110,4 +110,4 @@ to listen on all interfaces.
 * No authentication or encryption on the TCP port (TLS would be the next step).
 * One thread per client with no limit; a thread pool would be better.
 * Single device instance; multiple sensors would need minor numbers per device.
-* Driver tested to compile against Linux 6.8 headers; version guards cover 5.x - 6.15+ APIs.
+* Driver built and run on Linux 7.0 (Ubuntu in VirtualBox); also compiles against 6.8 headers.
