@@ -92,4 +92,4 @@ The alert switches to ALERT when the temperature goes above the threshold and ba
 
 ## Credits
 
-Practice project. I built and tested it myself on a real kernel, with an AI assistant helping with the initial code and design.
+Practice project. I built and tested it myself on a real kernel, initial code and design.
